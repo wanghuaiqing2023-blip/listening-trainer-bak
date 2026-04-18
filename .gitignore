@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment files
+.env
+
+# Frontend dependencies and build outputs
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+
+# Local data and generated outputs
+data/
+test_output/
+backend/ecdict.db
+
+# Runtime caches
+.cache/

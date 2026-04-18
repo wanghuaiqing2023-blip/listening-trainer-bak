@@ -1,0 +1,31 @@
+fastapi==0.115.0
+uvicorn[standard]==0.29.0
+sqlalchemy==2.0.41
+python-multipart==0.0.9
+python-dotenv==1.0.1
+pydantic==2.10.6
+pydantic-settings==2.7.0
+
+# Audio processing
+yt-dlp
+pydub
+librosa
+numpy
+soundfile
+
+# STT
+whisperx
+
+# NLP
+spacy
+wordfreq
+
+# Azure
+azure-cognitiveservices-speech==1.38.0
+
+# Anthropic Claude
+anthropic>=0.40.0
+
+# Utilities
+aiofiles
+httpx
