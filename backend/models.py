@@ -18,6 +18,7 @@ class User(Base):
     contents = relationship("Content", back_populates="user")
     user_cards = relationship("UserCard", back_populates="user")
     vocabularies = relationship("Vocabulary", back_populates="user")
+    dictation_attempts = relationship("DictationAttempt", back_populates="user")
 
 
 class Content(Base):
@@ -64,6 +65,7 @@ class Segment(Base):
 
     content = relationship("Content", back_populates="segments")
     user_cards = relationship("UserCard", back_populates="segment")
+    dictation_attempts = relationship("DictationAttempt", back_populates="segment")
 
 
 class UserCard(Base):
@@ -113,3 +115,23 @@ class Vocabulary(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="vocabularies")
+
+
+class DictationAttempt(Base):
+    __tablename__ = "dictation_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    segment_id = Column(Integer, ForeignKey("segments.id"), nullable=False)
+
+    reference_text = Column(Text, default="")
+    user_text = Column(Text, default="")
+    accuracy = Column(Float, default=0.0)
+    correct_word_count = Column(Integer, default=0)
+    reference_word_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    analysis_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="dictation_attempts")
+    segment = relationship("Segment", back_populates="dictation_attempts")

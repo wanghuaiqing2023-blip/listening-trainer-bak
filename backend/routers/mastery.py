@@ -17,13 +17,13 @@ from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import get_db
-from backend.models import Segment, UserCard, User, Vocabulary
+from backend.models import DictationAttempt, Segment, UserCard, User, Vocabulary
 from backend.services.azure_speech import assess_pronunciation, synthesize_speech
 from backend.services.openai_service import generate_generalization_sentence, evaluate_dictation
 from backend.services.srs import review_card
 from backend.services.vocabulary import update_mastery_prob
 from backend.utils.audio import change_speed, add_noise
-from backend.utils.text import dictation_accuracy
+from backend.utils.text import analyze_dictation
 from datetime import datetime
 
 router = APIRouter(prefix="/mastery", tags=["mastery"])
@@ -47,6 +47,48 @@ def _get_or_create_card(user_id: int, segment_id: int, db: Session) -> UserCard:
         db.commit()
         db.refresh(card)
     return card
+
+
+# ---------------------------------------------------------------------------
+# Dictation discovery
+# ---------------------------------------------------------------------------
+
+@router.post("/dictation/check")
+async def check_dictation(
+    segment_id: int = Form(...),
+    user_text: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Analyze a user's free dictation against the segment reference text.
+    Returns detailed word-level errors and persists the attempt for profiling.
+    """
+    user = _get_user(db)
+    seg = db.get(Segment, segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail="Segment not found")
+
+    analysis = analyze_dictation(seg.text or "", user_text or "")
+
+    attempt = DictationAttempt(
+        user_id=user.id,
+        segment_id=segment_id,
+        reference_text=seg.text or "",
+        user_text=user_text or "",
+        accuracy=analysis["accuracy"],
+        correct_word_count=analysis["correct_word_count"],
+        reference_word_count=analysis["reference_word_count"],
+        error_count=analysis["error_count"],
+        analysis_json=analysis,
+    )
+    db.add(attempt)
+    db.commit()
+    db.refresh(attempt)
+
+    return {
+        **analysis,
+        "attempt_id": attempt.id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +295,8 @@ async def submit_stress_test(
     if not seg:
         raise HTTPException(status_code=404, detail="Segment not found")
 
-    accuracy = dictation_accuracy(seg.text, user_text)
+    analysis = analyze_dictation(seg.text or "", user_text or "")
+    accuracy = analysis["accuracy"]
     passed = accuracy >= 0.85
 
     card = _get_or_create_card(user.id, segment_id, db)
@@ -282,6 +325,7 @@ async def submit_stress_test(
     return {
         "passed": passed,
         "accuracy": round(accuracy, 3),
+        "analysis": analysis,
         "gate3_complete": card.stress_passed,
         "card_state": card.state,
         "next_review": card.next_review.isoformat() if card.next_review else None,

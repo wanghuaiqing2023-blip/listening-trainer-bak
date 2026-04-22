@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <!-- Dictionary popup (fixed, outside training-view) -->
   <Teleport to="body">
     <div v-if="dictPopup"
@@ -66,7 +66,16 @@
       <!-- Layer 0: Listen only -->
       <div v-if="currentLayer === 0" class="listen-only">
         <div class="listen-hint">🎧 只听，不看文字。</div>
-        <button class="btn-primary" @click="unlockLayer(1)">我听了，继续</button>
+        <DictationCheck
+          :segment-id="card.id"
+          :reference-text="card.text"
+          @checked="onDictationChecked"
+        />
+        <div class="listen-actions">
+          <button class="btn-primary" @click="unlockLayer(1)">
+            {{ hasDictationAttempt ? '查看原句与标注' : '跳过听写，直接看答案' }}
+          </button>
+        </div>
       </div>
 
       <!-- Layer 1: Show text + phonetic annotations -->
@@ -185,11 +194,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api'
 import DifficultyBadge from '@/components/DifficultyBadge.vue'
 import AudioPlayer from '@/components/AudioPlayer.vue'
+import DictationCheck from '@/components/DictationCheck.vue'
 import ShadowingRecorder from '@/components/ShadowingRecorder.vue'
 import GeneralizationTest from '@/components/GeneralizationTest.vue'
 import StressTest from '@/components/StressTest.vue'
@@ -202,10 +212,10 @@ const currentLayer = ref(0)
 const maxLayer = ref(0)
 const currentPlayTime = ref(0)
 const wordsHidden = ref(false)
+const hasDictationAttempt = ref(false)
 
 // Dictionary popup
 const dictPopup = ref(null)   // { word, phonetic, entries, x, y } | null
-const dictLoading = ref(false)
 const dictCache = new Map()
 
 async function onWordClick(event, tok) {
@@ -362,6 +372,10 @@ function unlockLayer(n) {
   currentLayer.value = n
 }
 
+function onDictationChecked() {
+  hasDictationAttempt.value = true
+}
+
 function onShadowPass() {
   card.value.card.shadow_streak = 3
   unlockLayer(5)
@@ -441,6 +455,7 @@ onMounted(async () => {
 
 .listen-only { text-align: center; padding: 20px 0; }
 .listen-hint { font-size: 16px; margin-bottom: 20px; color: var(--text-muted); }
+.listen-actions { margin-top: 18px; }
 
 .annotated-text {
   font-size: 18px;
