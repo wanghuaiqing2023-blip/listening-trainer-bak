@@ -175,44 +175,6 @@ Respond with a JSON array of strings only:
     return [full_text]
 
 
-def extract_sentence_chunks(sentence: str) -> list[str]:
-    """
-    Ask Claude to split one sentence into listening-friendly chunks.
-    Returns a list of chunk strings in original order.
-    """
-    prompt = f"""You are splitting one English sentence into listening-friendly chunks for an English listening trainer.
-
-Sentence:
-"{sentence}"
-
-Rules:
-- Keep the original wording exactly
-- Return contiguous chunks in the original order
-- Chunks should help a learner hear the sentence in meaningful groups
-- Prefer natural phrase boundaries over grammar jargon
-- Keep common expressions together when possible
-- Avoid chunks that are only a single function word unless absolutely necessary
-- Usually produce 2 to 6 chunks for one sentence
-
-Respond with JSON only:
-{{"chunks": ["chunk 1", "chunk 2", "chunk 3"]}}"""
-
-    text = _chat(prompt, temperature=0.1, max_tokens=300)
-    start = text.find('{')
-    end = text.rfind('}') + 1
-    if start >= 0 and end > start:
-        try:
-            data = json.loads(text[start:end])
-            chunks = data.get("chunks", [])
-            if isinstance(chunks, list):
-                cleaned = [c.strip() for c in chunks if isinstance(c, str) and c.strip()]
-                if cleaned:
-                    return cleaned
-        except json.JSONDecodeError:
-            pass
-    return [sentence]
-
-
 def explain_segments(full_text: str, sentences: list[str]) -> list[str]:
     """
     Generate a deep Chinese linguistic explanation for each sentence,

@@ -14,7 +14,6 @@
         <router-link to="/library">训练库</router-link>
         <router-link to="/upload">上传</router-link>
         <router-link to="/vocabulary">词汇</router-link>
-        <router-link to="/chunks">语块</router-link>
       </div>
       <div class="nav-level" @click="router.push('/onboarding')">
         <span class="level-dot" :class="{ 'level-dot-error': llmError }"></span>

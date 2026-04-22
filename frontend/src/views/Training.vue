@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <!-- Dictionary popup (fixed, outside training-view) -->
   <Teleport to="body">
     <div v-if="dictPopup"
@@ -61,9 +61,6 @@
       @timeupdate="t => currentPlayTime = t"
     />
 
-    <!-- Hidden audio element for chunk playback (seek + play a sub-range) -->
-    <audio ref="chunkAudioEl" :src="audioSrc" preload="auto" style="display:none" />
-
     <!-- Layer content -->
     <div class="layer-content card">
       <!-- Layer 0: Listen only -->
@@ -98,7 +95,6 @@
           <div class="explanation-label">📚 语言讲解</div>
           <div class="explanation-text">{{ card.explanation }}</div>
         </div>
-        <ChunkBar :chunks="card.chunks" @play="playChunk" :playing="playingChunk" />
         <button class="btn-primary" @click="unlockLayer(2)">继续 →</button>
       </div>
 
@@ -119,7 +115,6 @@
             @click="onWordClick($event, tok)"
           >{{ tok.text }}</span>
         </div>
-        <ChunkBar :chunks="card.chunks" @play="playChunk" :playing="playingChunk" />
         <button class="btn-primary" @click="unlockLayer(3)">继续 →</button>
       </div>
 
@@ -139,7 +134,6 @@
             @click="onWordClick($event, tok)"
           >{{ tok.text }}</span>
         </div>
-        <ChunkBar :chunks="card.chunks" @play="playChunk" :playing="playingChunk" />
         <button class="btn-primary" style="margin-top:16px" @click="currentLayer = 4">进入掌握验证 →</button>
       </div>
 
@@ -199,7 +193,6 @@ import AudioPlayer from '@/components/AudioPlayer.vue'
 import ShadowingRecorder from '@/components/ShadowingRecorder.vue'
 import GeneralizationTest from '@/components/GeneralizationTest.vue'
 import StressTest from '@/components/StressTest.vue'
-import ChunkBar from '@/components/ChunkBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,10 +202,6 @@ const currentLayer = ref(0)
 const maxLayer = ref(0)
 const currentPlayTime = ref(0)
 const wordsHidden = ref(false)
-
-// Chunk playback
-const chunkAudioEl = ref(null)
-const playingChunk = ref('')
 
 // Dictionary popup
 const dictPopup = ref(null)   // { word, phonetic, entries, x, y } | null
@@ -369,33 +358,8 @@ function phenoColor(type) {
 }
 
 function unlockLayer(n) {
-  // When first entering Layer 1, mark chunks as encountered
-  if (n === 1 && currentLayer.value === 0 && card.value) {
-    api.post('/chunks/encounter', { segment_id: card.value.id }).catch(() => {})
-  }
   maxLayer.value = Math.max(maxLayer.value, n)
   currentLayer.value = n
-}
-
-function playChunk(chunk) {
-  const el = chunkAudioEl.value
-  if (!el) return
-  // Stop any ongoing chunk playback
-  playingChunk.value = ''
-  el.pause()
-
-  el.currentTime = chunk.start
-  playingChunk.value = chunk.text
-  el.play()
-
-  const stop = () => {
-    if (el.currentTime >= chunk.end) {
-      el.pause()
-      playingChunk.value = ''
-      el.removeEventListener('timeupdate', stop)
-    }
-  }
-  el.addEventListener('timeupdate', stop)
 }
 
 function onShadowPass() {
