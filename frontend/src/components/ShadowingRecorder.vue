@@ -63,7 +63,7 @@ const submitting = ref(false)
 const result = ref(null)
 const error = ref('')
 let mediaRecorder = null
-let chunks = []
+let recordedBlobs = []
 
 const failedWords = computed(() =>
   (result.value?.assessment?.words || []).filter(w => w.accuracy < 70)
@@ -72,11 +72,11 @@ const failedWords = computed(() =>
 async function startRecording() {
   error.value = ''
   result.value = null
-  chunks = []
+  recordedBlobs = []
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     mediaRecorder = new MediaRecorder(stream)
-    mediaRecorder.ondataavailable = e => chunks.push(e.data)
+    mediaRecorder.ondataavailable = e => recordedBlobs.push(e.data)
     mediaRecorder.start()
     recording.value = true
   } catch (e) {
@@ -89,7 +89,7 @@ async function stopRecording() {
   recording.value = false
   mediaRecorder.stop()
   mediaRecorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: 'audio/webm' })
+    const blob = new Blob(recordedBlobs, { type: 'audio/webm' })
     await submitRecording(blob)
     mediaRecorder.stream.getTracks().forEach(t => t.stop())
   }
