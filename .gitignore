@@ -33,3 +33,4 @@ backend/ecdict.db
 
 # Runtime caches
 .cache/
+.runtime/
