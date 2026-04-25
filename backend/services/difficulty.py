@@ -143,6 +143,7 @@ def compute_difficulty(
     text: str,
     audio_path: str,
     phenomena_count: int = 0,
+    phonetics_available: bool = True,
     user_vocab: dict[str, float] | None = None,
 ) -> dict:
     """
@@ -161,7 +162,9 @@ def compute_difficulty(
     word_count = len(words)
 
     speech_rate = score_speech_rate(words)
-    phonetics = score_phonetics(phenomena_count, word_count)
+    # When Azure Speech is unavailable, use a neutral phonetics score instead of
+    # incorrectly treating "no detected phenomena" as genuinely easy speech.
+    phonetics = score_phonetics(phenomena_count, word_count) if phonetics_available else 5.0
 
     if user_vocab is not None:
         vocabulary = score_vocabulary_for_user(text, user_vocab)

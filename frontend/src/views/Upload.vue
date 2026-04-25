@@ -64,11 +64,28 @@
           </div>
           <div class="job-actions">
             <div v-if="job.status === 'processing'" class="loading-spinner"></div>
-            <div v-if="job.status === 'ready'" class="job-count">{{ job.segment_count }} 个片段</div>
-            <router-link v-if="job.status === 'ready'" to="/library"
-              class="btn-secondary" style="padding:4px 12px;font-size:13px">
-              去训练
-            </router-link>
+            <button
+              v-if="job.status === 'processing'"
+              class="btn-secondary action-btn"
+              @click="pauseJob(job.id)"
+            >
+              暂停
+            </button>
+            <span v-if="job.status === 'pause_requested'" class="job-count">暂停中...</span>
+            <button
+              v-if="job.status === 'paused' || job.status === 'error'"
+              class="btn-secondary action-btn"
+              @click="restartJob(job.id)"
+            >
+              重启
+            </button>
+            <button
+              v-if="job.status === 'paused' || job.status === 'error'"
+              class="btn-secondary action-btn"
+              @click="deleteJob(job.id)"
+            >
+              删除
+            </button>
           </div>
         </div>
 
@@ -105,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import api from '@/api'
 
 const fileInput = ref(null)
@@ -116,6 +133,31 @@ const jobs = ref([])
 const error = ref('')
 const isDragover = ref(false)
 let pollingTimers = {}
+let pollingStopped = {}
+
+function normalizeJob(job) {
+  return {
+    id: job.id,
+    title: job.title,
+    status: job.status,
+    segment_count: job.segment_count || 0,
+    steps: job.steps || [],
+    progress: job.progress || 0,
+    error: job.error || '',
+    created_at: job.created_at || '',
+  }
+}
+
+function upsertJob(jobData) {
+  const normalized = normalizeJob(jobData)
+  const existing = jobs.value.find(j => j.id === normalized.id)
+  if (existing) {
+    Object.assign(existing, normalized)
+    return existing
+  }
+  jobs.value.unshift(normalized)
+  return normalized
+}
 
 function onFileSelect(e) {
   selectedFile.value = e.target.files[0] || null
@@ -167,36 +209,88 @@ async function submitYoutube() {
 }
 
 function addJob(res) {
-  jobs.value.unshift({
-    id: res.id,
-    title: res.title,
-    status: res.status,
-    segment_count: 0,
-    steps: [],
-    progress: 0,
-    error: '',
-  })
+  upsertJob(res)
   startPolling(res.id)
 }
 
 function startPolling(id) {
-  pollingTimers[id] = setInterval(async () => {
+  if (pollingTimers[id]) return
+
+  pollingStopped[id] = false
+
+  const poll = async () => {
+    if (pollingStopped[id]) return
     try {
       const data = await api.get(`/content/${id}/status`)
-      const job = jobs.value.find(j => j.id === id)
-      if (job) {
-        job.status = data.status
-        job.segment_count = data.segment_count
-        job.error = data.error
-        job.steps = data.steps || []
-        job.progress = data.progress || 0
-      }
-      if (data.status === 'ready' || data.status === 'error') {
-        clearInterval(pollingTimers[id])
+      upsertJob(data)
+      if (data.status === 'ready' || data.status === 'error' || data.status === 'paused') {
+        clearTimeout(pollingTimers[id])
         delete pollingTimers[id]
+        delete pollingStopped[id]
+        return
       }
     } catch {}
-  }, 2000)
+
+    if (pollingStopped[id]) return
+    pollingTimers[id] = setTimeout(poll, 2000)
+  }
+
+  pollingTimers[id] = setTimeout(poll, 0)
+}
+
+function shouldRestoreJob(job) {
+  return ['processing', 'pause_requested', 'paused', 'error'].includes(job.status)
+}
+
+async function loadJobs() {
+  try {
+    const data = await api.get('/content/')
+    jobs.value = (data || [])
+      .map(normalizeJob)
+      .filter(shouldRestoreJob)
+    for (const job of jobs.value) {
+      if (job.status === 'processing') {
+        startPolling(job.id)
+      }
+    }
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function pauseJob(id) {
+  try {
+    const data = await api.post(`/content/${id}/pause`)
+    upsertJob(data)
+    startPolling(id)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function restartJob(id) {
+  try {
+    const data = await api.post(`/content/${id}/restart`)
+    upsertJob(data)
+    startPolling(id)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function deleteJob(id) {
+  try {
+    await api.delete(`/content/${id}`)
+    jobs.value = jobs.value.filter(job => job.id !== id)
+    if (pollingTimers[id]) {
+      pollingStopped[id] = true
+      clearTimeout(pollingTimers[id])
+      delete pollingTimers[id]
+      delete pollingStopped[id]
+    }
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 function stepIcon(status) {
@@ -204,19 +298,34 @@ function stepIcon(status) {
 }
 
 function statusLabel(s) {
-  return { processing: '处理中', ready: '已完成', error: '失败' }[s] || s
+  return {
+    processing: '处理中',
+    pause_requested: '暂停中',
+    paused: '已暂停',
+    ready: '已完成',
+    error: '失败',
+  }[s] || s
 }
 
 function statusClass(s) {
   return {
     processing: 'badge badge-blue',
+    pause_requested: 'badge badge-blue',
+    paused: 'badge',
     ready: 'badge badge-green',
     error: 'badge badge-red',
   }[s] || 'badge'
 }
 
 onUnmounted(() => {
-  Object.values(pollingTimers).forEach(clearInterval)
+  Object.keys(pollingTimers).forEach(id => {
+    pollingStopped[id] = true
+    clearTimeout(pollingTimers[id])
+  })
+})
+
+onMounted(() => {
+  loadJobs()
 })
 </script>
 

@@ -438,6 +438,49 @@ def ensure_spacy_model(venv_python: Path) -> None:
     run_checked([str(venv_python), "-m", "spacy", "download", "en_core_web_sm"], cwd=ROOT)
 
 
+def ensure_whisper_model_ready(venv_python: Path) -> None:
+    """
+    Verify that locally installed WhisperX assets can be loaded before the app
+    starts serving traffic.
+    """
+    stamp = dependency_stamp("whisper-model")
+    inputs = [
+        ROOT / ".env",
+        ROOT / "requirements.txt",
+        ROOT / "backend" / "config.py",
+        ROOT / "backend" / "services" / "transcriber.py",
+    ]
+    if not stamp_is_stale(stamp, inputs):
+        return
+
+    command = [
+        str(venv_python),
+        "-c",
+        (
+            "from backend.services import transcriber; "
+            "info = transcriber.prewarm(); "
+            "print('[INFO] WhisperX prewarm ready:', info)"
+        ),
+    ]
+
+    print("[INFO] Verifying local WhisperX model assets...")
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        check=False,
+        timeout=3600,
+    )
+    if result.returncode == 0:
+        touch(stamp)
+        return
+
+    raise RuntimeError(
+        "WhisperX local model verification failed. "
+        "Run `.\\.venv\\Scripts\\python.exe scripts\\install_models.py` first, "
+        "then retry."
+    )
+
+
 def resolve_service_pid(service: ServiceConfig, fallback_pid: int | None = None) -> int | None:
     candidates: list[int] = []
     if fallback_pid and fallback_pid > 0:
@@ -532,6 +575,7 @@ def command_start(args: argparse.Namespace) -> int:
     ensure_python_dependencies(venv_python)
     ensure_frontend_dependencies()
     ensure_spacy_model(venv_python)
+    ensure_whisper_model_ready(venv_python)
 
     stop_tracked_service(SERVICES["frontend"])
     stop_tracked_service(SERVICES["backend"])

@@ -23,9 +23,13 @@ class Settings(BaseSettings):
     segments_dir: Path = BASE_DIR / "data" / "audio_segments"
     db_path: str = str(BASE_DIR / "data" / "db" / "listening.db")
     ecdict_path: str = str(BASE_DIR / "backend" / "ecdict.db")
+    model_assets_dir: Path = BASE_DIR / "data" / "models"
+    whisper_assets_dir: Path = BASE_DIR / "data" / "models" / "whisper"
+    align_assets_dir: Path = BASE_DIR / "data" / "models" / "alignment"
+    artifacts_dir: Path = BASE_DIR / "data" / "artifacts"
 
     # Whisper
-    whisper_model: str = "base"  # tiny/base/small/medium/large
+    whisper_model: str = "base"  # valid values: tiny/base/small/medium/large
 
     # Difficulty thresholds
     vocab_unknown_threshold: float = 0.30
@@ -46,3 +50,7 @@ settings = Settings()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)
 settings.segments_dir.mkdir(parents=True, exist_ok=True)
 Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
+settings.model_assets_dir.mkdir(parents=True, exist_ok=True)
+settings.whisper_assets_dir.mkdir(parents=True, exist_ok=True)
+settings.align_assets_dir.mkdir(parents=True, exist_ok=True)
+settings.artifacts_dir.mkdir(parents=True, exist_ok=True)

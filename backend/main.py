@@ -13,7 +13,11 @@ from backend.config import settings
 from backend.database import Base, engine, run_migrations
 from backend.routers import content, cards, mastery, user, vocabulary, dictionary
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 # Create all database tables, then patch any missing columns
 Base.metadata.create_all(bind=engine)
@@ -40,6 +44,11 @@ app.include_router(mastery.router)
 app.include_router(user.router)
 app.include_router(vocabulary.router)
 app.include_router(dictionary.router)
+
+
+@app.on_event("startup")
+def mark_interrupted_tasks_on_boot() -> None:
+    content.mark_interrupted_contents()
 
 
 # ---------------------------------------------------------------------------

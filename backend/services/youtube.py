@@ -1,10 +1,19 @@
 """Download audio (and subtitles) from YouTube using yt-dlp."""
 import re
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
 from backend.config import settings
+
+
+def _yt_dlp_base_command() -> list[str]:
+    """
+    Run yt-dlp through the current Python interpreter so we do not depend on a
+    globally available `yt-dlp` executable in PATH.
+    """
+    return [sys.executable, "-m", "yt_dlp"]
 
 
 def download_youtube_audio_and_subs(url: str) -> tuple[str, list[dict] | None]:
@@ -19,7 +28,7 @@ def download_youtube_audio_and_subs(url: str) -> tuple[str, list[dict] | None]:
     expected_wav = out_dir / f"{stem}.wav"
 
     cmd = [
-        "yt-dlp",
+        *_yt_dlp_base_command(),
         "--no-playlist",
         "-x",
         "--audio-format", "wav",
@@ -31,7 +40,13 @@ def download_youtube_audio_and_subs(url: str) -> tuple[str, list[dict] | None]:
         "-o", out_template,
         url,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "yt-dlp is unavailable in the current Python environment. "
+            "Please install project dependencies and retry."
+        ) from exc
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
 
@@ -171,7 +186,7 @@ def get_youtube_title(url: str) -> str:
     """Fetch the video title without downloading."""
     try:
         result = subprocess.run(
-            ["yt-dlp", "--get-title", "--no-playlist", url],
+            [*_yt_dlp_base_command(), "--get-title", "--no-playlist", url],
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():

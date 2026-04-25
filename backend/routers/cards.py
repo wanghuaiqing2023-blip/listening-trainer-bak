@@ -27,6 +27,35 @@ def _user_vocab_map(db: Session, user_id: int) -> dict[str, float]:
     return {r.word: r.mastery_prob for r in rows}
 
 
+def _dedupe_segments_for_library(
+    segments: list[Segment],
+    user_card_map: dict[int, UserCard],
+) -> list[Segment]:
+    """
+    Library should not surface duplicate segments left behind by historical reruns.
+    Keep at most one segment for each (content_id, index), preferring:
+    1. a segment that already has a UserCard for this user
+    2. otherwise the newest segment id
+    """
+    selected: dict[tuple[int, int], Segment] = {}
+    for seg in segments:
+        key = (seg.content_id, seg.index)
+        current = selected.get(key)
+        if current is None:
+            selected[key] = seg
+            continue
+
+        current_has_card = current.id in user_card_map
+        seg_has_card = seg.id in user_card_map
+        if seg_has_card and not current_has_card:
+            selected[key] = seg
+            continue
+        if seg_has_card == current_has_card and seg.id > current.id:
+            selected[key] = seg
+
+    return sorted(selected.values(), key=lambda seg: (seg.content_id, seg.index))
+
+
 @router.get("/")
 def list_cards(
     mode: str = Query("training", enum=["training", "review", "all"]),
@@ -53,9 +82,13 @@ def list_cards(
     segments = (
         db.query(Segment)
         .filter(Segment.content_id.in_(content_ids))
-        .order_by(Segment.content_id, Segment.index)
+        .order_by(Segment.content_id, Segment.index, Segment.id.desc())
         .all()
     )
+
+    all_user_cards = db.query(UserCard).filter_by(user_id=user.id).all()
+    user_card_map = {card.segment_id: card for card in all_user_cards}
+    segments = _dedupe_segments_for_library(segments, user_card_map)
 
     # Build a title lookup to avoid N+1 queries
     content_title_map = {
@@ -84,9 +117,7 @@ def list_cards(
                 continue
         elif mode == "review":
             # Only cards due for SRS review
-            card = db.query(UserCard).filter_by(
-                user_id=user.id, segment_id=seg.id
-            ).first()
+            card = user_card_map.get(seg.id)
             if not card:
                 continue
             from datetime import datetime
@@ -96,9 +127,7 @@ def list_cards(
                 continue
 
         # Get or create UserCard
-        card = db.query(UserCard).filter_by(
-            user_id=user.id, segment_id=seg.id
-        ).first()
+        card = user_card_map.get(seg.id)
         card_state = card.state if card else "new"
         next_review = card.next_review.isoformat() if (card and card.next_review) else None
 

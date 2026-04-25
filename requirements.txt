@@ -12,6 +12,7 @@ pydub
 librosa
 numpy
 soundfile
+av==17.0.0
 
 # STT
 whisperx

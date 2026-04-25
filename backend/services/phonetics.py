@@ -77,12 +77,7 @@ class PhonemePhenomenon:
     phenomena: list[dict] = field(default_factory=list)  # [{type, label, info}]
 
 
-def _azure_assess_phonemes(audio_path: str, reference_text: str) -> list[dict]:
-    """
-    Call Azure Speech Pronunciation Assessment on a short audio segment.
-    Returns list of word-level phoneme data:
-    [{"word": str, "phonemes": [str], "offset_ms": int, "duration_ms": int}]
-    """
+def _build_recognizer(audio_path: str, reference_text: str) -> speechsdk.SpeechRecognizer:
     speech_config = speechsdk.SpeechConfig(
         subscription=settings.azure_speech_key,
         region=settings.azure_speech_region,
@@ -102,7 +97,47 @@ def _azure_assess_phonemes(audio_path: str, reference_text: str) -> list[dict]:
         audio_config=audio_config,
     )
     pron_config.apply_to(recognizer)
+    return recognizer
 
+
+def check_service_availability(audio_path: str, reference_text: str) -> tuple[bool, str]:
+    """
+    Probe Azure Speech once before the per-segment loop starts.
+
+    Returns:
+      (True, "ok") if the service looks available
+      (False, "<reason>") if the service should be skipped for the whole step
+    """
+    if not settings.azure_speech_key.strip():
+        return False, "Azure Speech key is not configured"
+    if not settings.azure_speech_region.strip():
+        return False, "Azure Speech region is not configured"
+
+    try:
+        recognizer = _build_recognizer(audio_path, reference_text)
+        result = recognizer.recognize_once()
+    except Exception as exc:
+        return False, f"Azure Speech probe failed: {exc}"
+
+    if result.reason == speechsdk.ResultReason.Canceled:
+        details = speechsdk.CancellationDetails(result)
+        error_details = (details.error_details or "").strip()
+        reason_name = str(details.reason)
+        if error_details:
+            return False, f"{reason_name}: {error_details}"
+        return False, reason_name
+
+    # RecognizedSpeech and NoMatch both mean the service request completed.
+    return True, "ok"
+
+
+def _azure_assess_phonemes(audio_path: str, reference_text: str) -> list[dict]:
+    """
+    Call Azure Speech Pronunciation Assessment on a short audio segment.
+    Returns list of word-level phoneme data:
+    [{"word": str, "phonemes": [str], "offset_ms": int, "duration_ms": int}]
+    """
+    recognizer = _build_recognizer(audio_path, reference_text)
     result = recognizer.recognize_once()
 
     if result.reason != speechsdk.ResultReason.RecognizedSpeech:
