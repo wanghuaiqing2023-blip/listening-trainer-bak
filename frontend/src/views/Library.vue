@@ -40,8 +40,11 @@
           <div
             v-for="card in group.cards"
             :key="card.id"
-            class="card card-item"
-            @click="router.push(`/training/${card.id}`)"
+            :id="`library-card-${card.id}`"
+            :data-card-id="card.id"
+            :ref="el => setCardRef(card.id, el)"
+            :class="['card', 'card-item', highlightedCardId === card.id ? 'card-current' : '']"
+            @click="openCard(card)"
           >
             <div class="card-top">
               <div style="display:flex;align-items:center;gap:6px;">
@@ -72,22 +75,28 @@
           </div>
         </div>
       </div>
+      <div class="scroll-tail-spacer" aria-hidden="true"></div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import DifficultyBadge from '@/components/DifficultyBadge.vue'
 import api from '@/api'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const cards = ref([])
 const loading = ref(false)
 const mode = ref(localStorage.getItem('library_mode') || 'training')
+const highlightedCardId = ref(null)
+const cardElements = new Map()
+const LIBRARY_NAV_CONTEXT_KEY = 'library_navigation_context'
+const NAVIGATION_ENABLED_MODES = ['all', 'training']
 
 const dimLabels = {
   speech_rate: '语速',
@@ -108,6 +117,109 @@ const groupedCards = computed(() => {
   return Array.from(map.values())
 })
 
+function setCardRef(id, el) {
+  if (!el) {
+    cardElements.delete(id)
+    return
+  }
+  cardElements.set(id, el)
+}
+
+function saveLibraryContext(cardId) {
+  const cardIds = cards.value.map(card => card.id)
+  let activeCardId = null
+
+  try {
+    const raw = sessionStorage.getItem(LIBRARY_NAV_CONTEXT_KEY)
+    if (raw) {
+      const existing = JSON.parse(raw)
+      if (existing.mode === mode.value) {
+        activeCardId = existing.activeCardId || null
+      }
+    }
+  } catch (error) {
+    console.error(error)
+  }
+
+  if (cardId !== undefined) {
+    activeCardId = cardId
+  }
+
+  sessionStorage.setItem(
+    LIBRARY_NAV_CONTEXT_KEY,
+    JSON.stringify({
+      mode: mode.value,
+      cardIds,
+      activeCardId,
+      savedAt: Date.now(),
+    }),
+  )
+}
+
+async function restoreCardPosition() {
+  const raw = sessionStorage.getItem(LIBRARY_NAV_CONTEXT_KEY)
+  if (!raw) return
+
+  try {
+    const context = JSON.parse(raw)
+    if (context.mode !== mode.value || !context.activeCardId) return
+
+    highlightedCardId.value = context.activeCardId
+    await nextTick()
+    await new Promise(resolve => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(resolve)
+      })
+    })
+
+    const element =
+      document.getElementById(`library-card-${context.activeCardId}`) ||
+      cardElements.get(context.activeCardId)
+    if (element) {
+      const scrollCardToTop = () => {
+        element.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' })
+      }
+
+      scrollCardToTop()
+      window.requestAnimationFrame(() => {
+        scrollCardToTop()
+        window.setTimeout(scrollCardToTop, 80)
+        window.setTimeout(scrollCardToTop, 220)
+        window.setTimeout(scrollCardToTop, 420)
+      })
+    }
+
+    window.setTimeout(() => {
+      if (highlightedCardId.value === context.activeCardId) {
+        highlightedCardId.value = null
+      }
+    }, 2000)
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+function openCard(card) {
+  saveLibraryContext(card.id)
+  router.push({
+    path: `/training/${card.id}`,
+    query: { from: 'library', mode: mode.value },
+  })
+}
+
+async function restoreCardPositionFromRouteOrContext() {
+  if (!NAVIGATION_ENABLED_MODES.includes(mode.value)) return
+
+  const requestedFocusId = Number(route.query.focus)
+  if (requestedFocusId && cards.value.some(card => card.id === requestedFocusId)) {
+    saveLibraryContext(requestedFocusId)
+  } else {
+    saveLibraryContext()
+  }
+
+  await restoreCardPosition()
+}
+
 async function fetchCards() {
   loading.value = true
   try {
@@ -116,6 +228,11 @@ async function fetchCards() {
     console.error(e)
   } finally {
     loading.value = false
+  }
+
+  if (cards.value.length) {
+    await nextTick()
+    await restoreCardPositionFromRouteOrContext()
   }
 }
 
@@ -141,6 +258,11 @@ async function deleteAll() {
 function setMode(m) {
   mode.value = m
   localStorage.setItem('library_mode', m)
+  if (NAVIGATION_ENABLED_MODES.includes(m)) {
+    saveLibraryContext()
+  } else {
+    sessionStorage.removeItem(LIBRARY_NAV_CONTEXT_KEY)
+  }
   fetchCards()
 }
 
@@ -167,7 +289,37 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('zh-CN')
 }
 
-onMounted(fetchCards)
+onMounted(() => {
+  const requestedMode = typeof route.query.mode === 'string' ? route.query.mode : ''
+  if (requestedMode && ['training', 'review', 'all'].includes(requestedMode)) {
+    mode.value = requestedMode
+    localStorage.setItem('library_mode', requestedMode)
+  }
+  fetchCards()
+})
+
+watch(
+  () => route.query.mode,
+  requestedMode => {
+    if (typeof requestedMode !== 'string' || !['training', 'review', 'all'].includes(requestedMode)) {
+      return
+    }
+    if (requestedMode === mode.value) {
+      return
+    }
+    mode.value = requestedMode
+    localStorage.setItem('library_mode', requestedMode)
+    fetchCards()
+  },
+)
+
+watch(
+  () => route.query.focus,
+  async () => {
+    if (loading.value || !cards.value.length) return
+    await restoreCardPositionFromRouteOrContext()
+  },
+)
 </script>
 
 <style scoped>
@@ -211,11 +363,17 @@ onMounted(fetchCards)
 
 .card-item {
   cursor: pointer;
+  scroll-margin-top: 84px;
   transition: all 0.15s;
 }
 .card-item:hover {
   border-color: var(--accent);
   transform: translateY(-2px);
+}
+
+.card-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(76, 110, 245, 0.18);
 }
 
 .card-top {
@@ -303,4 +461,8 @@ onMounted(fetchCards)
   line-height: 1;
 }
 .btn-delete-card:hover { background: #e74c3c; border-color: #e74c3c; color: #fff; }
+
+.scroll-tail-spacer {
+  height: 100vh;
+}
 </style>

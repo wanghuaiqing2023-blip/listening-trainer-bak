@@ -14,7 +14,13 @@ const routes = [
   { path: '/vocabulary', component: Vocabulary },
 ]
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes,
+  // We handle list-page restoration ourselves to keep the active card near the top.
+  scrollBehavior() {
+    return false
+  },
 })
+
+export default router

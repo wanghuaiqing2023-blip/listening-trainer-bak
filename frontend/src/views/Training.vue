@@ -26,10 +26,15 @@
   <div v-if="card" class="training-view">
     <!-- Header -->
     <div class="training-header">
-      <button class="btn-secondary" @click="router.push('/library')">← 返回</button>
+      <button class="btn-secondary" @click="goBackToLibrary">← 返回</button>
       <div class="header-center">
         <DifficultyBadge :score="card.difficulty.total" />
         <span class="card-state-label">{{ stateLabel(card.card.state) }}</span>
+      </div>
+      <div v-if="hasAllNavigation" class="card-nav">
+        <button class="btn-secondary" :disabled="!prevCardId" @click="goToPrevCard">← 上一张</button>
+        <span class="card-nav-position">{{ currentNavIndex + 1 }} / {{ navigationCardCount }}</span>
+        <button class="btn-secondary" :disabled="!nextCardId" @click="goToNextCard">下一张 →</button>
       </div>
       <div class="gate-indicators">
         <span :class="['gate', card.card.shadow_streak >= 3 ? 'done' : '']" title="Gate 1: 跟读">①</span>
@@ -183,7 +188,7 @@
         <div class="complete-icon">✅</div>
         <h3>三关全部通过！</h3>
         <p>卡片已进入 SRS 复习队列，将在 {{ card.card.interval_days }} 天后复习</p>
-        <button class="btn-primary" @click="router.push('/library')">继续下一张</button>
+        <button class="btn-primary" @click="hasAllNavigation && nextCardId ? goToNextCard() : goBackToLibrary()">继续下一张</button>
       </div>
     </div>
   </div>
@@ -194,8 +199,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import api from '@/api'
 import DifficultyBadge from '@/components/DifficultyBadge.vue'
 import AudioPlayer from '@/components/AudioPlayer.vue'
@@ -213,6 +218,9 @@ const maxLayer = ref(0)
 const currentPlayTime = ref(0)
 const wordsHidden = ref(false)
 const hasDictationAttempt = ref(false)
+const navigationContext = ref(null)
+const LIBRARY_NAV_CONTEXT_KEY = 'library_navigation_context'
+const NAVIGATION_ENABLED_MODES = ['all', 'training']
 
 // Dictionary popup
 const dictPopup = ref(null)   // { word, phonetic, entries, x, y } | null
@@ -302,6 +310,89 @@ const layers = [
 const layerSpeed = computed(() => layers[currentLayer.value]?.speed || 1.0)
 const layerNoise = computed(() => layers[currentLayer.value]?.noise || false)
 const audioSrc = computed(() => card.value ? `/audio/${card.value.id}` : '')
+
+function readNavigationContext() {
+  const raw = sessionStorage.getItem(LIBRARY_NAV_CONTEXT_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    console.error(error)
+    return null
+  }
+}
+
+function writeNavigationContext(context) {
+  navigationContext.value = context
+  sessionStorage.setItem(LIBRARY_NAV_CONTEXT_KEY, JSON.stringify(context))
+}
+
+function refreshNavigationContext() {
+  navigationContext.value = readNavigationContext()
+}
+
+function updateActiveCardInContext(cardId) {
+  const context = readNavigationContext()
+  if (!context || !NAVIGATION_ENABLED_MODES.includes(context.mode) || !Array.isArray(context.cardIds)) return
+  writeNavigationContext({
+    ...context,
+    activeCardId: cardId,
+    savedAt: Date.now(),
+  })
+}
+
+const currentNavIndex = computed(() => {
+  if (!card.value || !navigationContext.value || !NAVIGATION_ENABLED_MODES.includes(navigationContext.value.mode)) return -1
+  const cardIds = navigationContext.value.cardIds
+  if (!Array.isArray(cardIds)) return -1
+  return cardIds.indexOf(card.value.id)
+})
+
+const hasAllNavigation = computed(() => currentNavIndex.value >= 0)
+const navigationCardCount = computed(() => navigationContext.value?.cardIds?.length || 0)
+const prevCardId = computed(() => {
+  if (!hasAllNavigation.value || currentNavIndex.value <= 0) return null
+  return navigationContext.value.cardIds[currentNavIndex.value - 1]
+})
+const nextCardId = computed(() => {
+  if (!hasAllNavigation.value) return null
+  const nextIndex = currentNavIndex.value + 1
+  if (nextIndex >= navigationCardCount.value) return null
+  return navigationContext.value.cardIds[nextIndex]
+})
+
+function buildLibraryReturnLocation() {
+  const mode = navigationContext.value?.mode || route.query.mode || 'all'
+  const query = { mode }
+  if (card.value?.id) {
+    query.focus = String(card.value.id)
+  }
+  return { path: '/library', query }
+}
+
+function goBackToLibrary() {
+  router.push(buildLibraryReturnLocation())
+}
+
+function navigateToCard(targetId) {
+  if (!targetId) return
+  updateActiveCardInContext(targetId)
+  router.replace({
+    path: `/training/${targetId}`,
+    query: {
+      from: 'library',
+      mode: navigationContext.value?.mode || route.query.mode || 'all',
+    },
+  })
+}
+
+function goToPrevCard() {
+  navigateToCard(prevCardId.value)
+}
+
+function goToNextCard() {
+  navigateToCard(nextCardId.value)
+}
 
 // Active word index based on playback time and word timestamps
 const activeWordIdx = computed(() => {
@@ -400,18 +491,65 @@ function stateLabel(s) {
   return { new: '新卡片', learning: '学习中', review: '待复习', mastered: '已掌握' }[s] || s
 }
 
-onMounted(async () => {
+function onKeydown(event) {
+  const targetTag = event.target?.tagName
+  if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') return
+  if (!hasAllNavigation.value) return
+
+  if (event.key === 'ArrowLeft' && prevCardId.value) {
+    event.preventDefault()
+    goToPrevCard()
+  } else if (event.key === 'ArrowRight' && nextCardId.value) {
+    event.preventDefault()
+    goToNextCard()
+  }
+}
+
+async function loadCard(cardId) {
+  loading.value = true
+  try {
+    card.value = await api.get(`/cards/${cardId}`)
+    refreshNavigationContext()
+    updateActiveCardInContext(card.value.id)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
   // Pre-warm speech synthesis so first real call is instant
   if (window.speechSynthesis) {
     const warmup = new SpeechSynthesisUtterance(' ')
     warmup.volume = 0
     window.speechSynthesis.speak(warmup)
   }
-  try {
-    card.value = await api.get(`/cards/${route.params.id}`)
-  } finally {
-    loading.value = false
+  refreshNavigationContext()
+  window.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+})
+
+watch(
+  () => route.params.id,
+  id => {
+    if (id) loadCard(id)
+  },
+  { immediate: true },
+)
+
+onBeforeRouteLeave(to => {
+  if (route.query.from !== 'library' || to.path !== '/library') {
+    return true
   }
+
+  const expected = buildLibraryReturnLocation()
+  if (to.query.mode === expected.query.mode && to.query.focus === expected.query.focus) {
+    return true
+  }
+
+  return expected
 })
 </script>
 
@@ -427,6 +565,19 @@ onMounted(async () => {
 }
 .header-center { display: flex; align-items: center; gap: 8px; flex: 1; }
 .card-state-label { font-size: 13px; color: var(--text-muted); }
+
+.card-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-nav-position {
+  min-width: 64px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .gate-indicators { display: flex; gap: 6px; }
 .gate {
